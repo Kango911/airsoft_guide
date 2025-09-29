@@ -1,18 +1,12 @@
 import mysql.connector
 from datetime import datetime
 from typing import List, Dict, Optional
+from config import get_config
 
 
 class Database:
     def __init__(self):
-        self.config = {
-            'host': 'localhost',
-            'user': 'root',
-            'password': 'rootroot',
-            'database': 'airsoft_bot',
-            'charset': 'utf8mb4',
-            'collation': 'utf8mb4_unicode_ci'
-        }
+        self.config = get_config().DB_CONFIG
         self.create_database()
         self.create_tables()
         self.insert_default_data()
@@ -20,27 +14,23 @@ class Database:
     def create_database(self):
         """Создание базы данных если не существует"""
         try:
-            conn = mysql.connector.connect(
-                host=self.config['host'],
-                user=self.config['user'],
-                password=self.config['password']
-            )
+            # Подключаемся без указания базы данных
+            temp_config = self.config.copy()
+            temp_config.pop('database', None)
+
+            conn = mysql.connector.connect(**temp_config)
             cursor = conn.cursor()
 
             # Создаем базу данных
             cursor.execute(
                 f"CREATE DATABASE IF NOT EXISTS {self.config['database']} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
 
-            # Создаем пользователя если нужно (опционально)
-            # cursor.execute("CREATE USER IF NOT EXISTS 'airsoft_user'@'localhost' IDENTIFIED BY 'password'")
-            # cursor.execute(f"GRANT ALL PRIVILEGES ON {self.config['database']}.* TO 'airsoft_user'@'localhost'")
-            # cursor.execute("FLUSH PRIVILEGES")
-
             cursor.close()
             conn.close()
             print("✅ База данных создана/проверена успешно")
         except Exception as e:
             print(f"❌ Ошибка создания базы данных: {e}")
+            raise
 
     def create_tables(self):
         """Создание всех необходимых таблиц"""
