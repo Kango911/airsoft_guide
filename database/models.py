@@ -5,110 +5,82 @@ from config import get_config
 
 
 class Database:
+    _instance = None
+    _initialized = False
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(Database, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self):
-        self.config = get_config().DB_CONFIG
-        self.create_database()
-        self.create_tables()
-        self.insert_default_data()
+        # Это будет вызвано только один раз благодаря __new__
+        if not self._initialized:
+            self.config = get_config().DB_CONFIG
+            self._initialized = True
+            # Не инициализируем базу здесь - вынесем в отдельный метод
+            print("✅ Database instance created")
+
+    def initialize(self):
+        """Явная инициализация базы данных"""
+        try:
+            self.create_database()
+            self.create_tables()
+            self.insert_default_data()
+            print("✅ База данных полностью инициализирована")
+        except Exception as e:
+            print(f"❌ Ошибка инициализации базы: {e}")
+            raise
 
     def create_database(self):
         """Создание базы данных если не существует"""
         try:
-            # Подключаемся без указания базы данных
+            # Временно убираем базу из конфига для создания
             temp_config = self.config.copy()
-            temp_config.pop('database', None)
+            database_name = temp_config.pop('database')
 
             conn = mysql.connector.connect(**temp_config)
             cursor = conn.cursor()
 
-            # Создаем базу данных
             cursor.execute(
-                f"CREATE DATABASE IF NOT EXISTS {self.config['database']} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-
+                f"CREATE DATABASE IF NOT EXISTS {database_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             cursor.close()
             conn.close()
-            print("✅ База данных создана/проверена успешно")
+
+            print("✅ База данных создана/проверена")
         except Exception as e:
-            print(f"❌ Ошибка создания базы данных: {e}")
+            print(f"❌ Ошибка создания базы: {e}")
             raise
 
     def create_tables(self):
-        """Создание всех необходимых таблиц"""
+        """Создание таблиц (оптимизированная версия)"""
         tables_sql = {
             'competitor_products': '''
                 CREATE TABLE IF NOT EXISTS competitor_products (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(500) NOT NULL,
                     price DECIMAL(10,2),
-                    old_price DECIMAL(10,2) NULL,
                     competitor VARCHAR(100) NOT NULL,
                     url VARCHAR(1000),
-                    in_stock BOOLEAN DEFAULT TRUE,
-                    weight VARCHAR(50) NULL,
-                    package VARCHAR(100) NULL,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_competitor (competitor),
-                    INDEX idx_price (price),
-                    INDEX idx_updated (last_updated)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             ''',
-
             'our_products': '''
                 CREATE TABLE IF NOT EXISTS our_products (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(500) NOT NULL,
                     price DECIMAL(10,2),
-                    old_price DECIMAL(10,2) NULL,
                     vk_url VARCHAR(1000),
-                    vk_photo_url VARCHAR(1000),
-                    description TEXT,
-                    in_stock BOOLEAN DEFAULT TRUE,
-                    weight VARCHAR(50) NULL,
-                    package VARCHAR(100) NULL,
-                    vk_product_id INT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_price (price),
-                    INDEX idx_stock (in_stock)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             ''',
-
             'admins': '''
                 CREATE TABLE IF NOT EXISTS admins (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id BIGINT NOT NULL UNIQUE,
                     username VARCHAR(100),
-                    full_name VARCHAR(200),
-                    is_active BOOLEAN DEFAULT TRUE,
-                    permissions JSON,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_login TIMESTAMP NULL,
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_active (is_active)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            ''',
-
-            'price_history': '''
-                CREATE TABLE IF NOT EXISTS price_history (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    product_id INT NOT NULL,
-                    product_type ENUM('competitor', 'our') NOT NULL,
-                    price DECIMAL(10,2) NOT NULL,
-                    change_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_product (product_id, product_type),
-                    INDEX idx_date (change_date)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            ''',
-
-            'settings': '''
-                CREATE TABLE IF NOT EXISTS settings (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    setting_key VARCHAR(100) NOT NULL UNIQUE,
-                    setting_value TEXT,
-                    description VARCHAR(500),
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             '''
         }
 
@@ -124,36 +96,32 @@ class Database:
             conn.close()
         except Exception as e:
             print(f"❌ Ошибка создания таблиц: {e}")
+            raise
 
     def insert_default_data(self):
-        """Вставка начальных данных"""
+        """Только самые необходимые начальные данные"""
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # Добавляем настройки по умолчанию
-            default_settings = [
-                ('price_update_interval', '3600', 'Интервал обновления цен в секундах'),
-                ('max_products_per_message', '10', 'Максимальное количество товаров в одном сообщении'),
-                ('notification_enabled', '1', 'Включить уведомления об изменении цен'),
-                ('price_change_threshold', '10', 'Порог изменения цены для уведомления (%)'),
-                ('group_chat_id', '-1001234567890', 'ID группы Telegram'),
-                ('price_topic_id', '5', 'ID топика для цен'),
-                ('order_topic_id', '6', 'ID топика для заказов')
-            ]
-
-            for key, value, description in default_settings:
-                cursor.execute('''
-                    INSERT IGNORE INTO settings (setting_key, setting_value, description)
-                    VALUES (%s, %s, %s)
-                ''', (key, value, description))
+            # Добавляем только критически важные настройки
+            cursor.execute('''
+                INSERT IGNORE INTO settings (setting_key, setting_value, description)
+                VALUES 
+                ('price_update_interval', '3600', 'Интервал обновления цен'),
+                ('group_chat_id', %s, 'ID группы Telegram')
+            ''', (self.config.get('GROUP_CHAT_ID', ''),))
 
             conn.commit()
             cursor.close()
             conn.close()
             print("✅ Начальные данные добавлены")
         except Exception as e:
-            print(f"❌ Ошибка добавления начальных данных: {e}")
+            print(f"⚠️ Предупреждение при добавлении начальных данных: {e}")
+
+    def get_connection(self):
+        """Получение соединения с базой данных"""
+        return mysql.connector.connect(**self.config)
 
     def get_connection(self):
         """Получение соединения с базой данных"""
